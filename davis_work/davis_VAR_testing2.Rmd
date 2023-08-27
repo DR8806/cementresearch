@@ -7,94 +7,43 @@ date: "2023-08-16"
 ```{r, echo= FALSE}
 library(tidyverse)
 library(vars)
-library(here)
-library(devtools)
 library(ggplot2)
 library(forecast)
 library(tseries)
-library(stargazer)
 library(gridExtra)
-library(MASS)
+library(dplyr)
+library(tidyr)
 
+library(grDevices)
 ```
 
 # load data set
 
 ```{r, echo=TRUE}
 setwd("C:/Users/User/Desktop/R_Data_Science/cementresearch/")
-df1 <- read_csv("data/combinedata6.csv") #includes real GDP
+df <- read_csv("data/combinedata6.csv") #includes real GDP
 # df <- read_csv("data/combinedata5.csv")
 
-total_housing <- read_csv("data/Total Number of Houses in US - Sheet1.csv")
-total_housing <- total_housing[-c(1,2),]
-total_housing <- total_housing[rev(row.names(total_housing)), ] #reverse year order; before starts from 2021 top, now rev() switches it
+variables <- c("Cement","unemploy","housing", "limestone","gdp")
 
-df <- cbind(df1,total_housing$`All households`)
+start_year <- 1971 #we are working with 1971 - 2021 data now
 
-colnames(df)[14] <- "tot_housing"
-
+df <- df |>
+  filter(year >= start_year)
 ```
 
-```{r}
-df_comb <- cbind(df[,c("year","gdp")],df_old$gdp)
-
-df_comb |>
-  ggplot(aes(x =year, y = df_comb$`df_old$gdp`/1000000000/df_comb$gdp)) + #nominal divded by real. In units of billions of dollars
-  geom_point() +
-  geom_smooth(method='lm') +
-  ggtitle("deflator over time")
-
-colnames(df_comb)[3] = "gdpnominal"
-
-summary(m.ols <- lm(gdp ~ year, data=df_comb))
-par(mfrow=c(2,2))
-plot(m.ols)
-
-bc <- boxcox(m.ols)
-
-lambda <- bc$x[which.max(bc$y)]
-
-new_model <- lm(((gdp^lambda-1)/lambda) ~ year,data = df_comb)
-par(mfrow=c(2,2))
-plot(new_model)
-
-
-```
-
-
-Variables considered: unnemploy, population, housing, limestone
+Variables considered: Cement, unemploy, limestone, gdp , housing
 
 # adf test
 
 ```{r}
 
-
-adf.test(df$unemploy) #not stationary
-adf.test(diff(df$unemploy)) 
-
-adf.test(df$population)
-adf.test(diff(df$population,differences = 3))
-
-adf.test(df$housing)
-adf.test(diff(df$housing))
-
-adf.test(df$limestone)
-adf.test(diff(df$limestone))
-
-adf.test(df$Cement)
-adf.test(diff(df$Cement))
-
-adf.test(df$tot_housing)
-adf.test(diff(df$tot_housing))
-
 # ----------- SYNTHESIZE RESULTS -----------------
 
-# Create an empty data frame to store results
-variables <- c("unemploy", "population", "housing", "limestone", "Cement")
 adf_results <- data.frame(variable = character(0), 
-                          first_pvalue = numeric(0),
+                          first_pvalue = character(0),
                           first_stationarity = character(0),
-                          last_pvalue = numeric(0),
+                          last_pvalue = character(0),
                           last_stationarity = character(0),
                           num_differences = integer(0))
 
@@ -104,7 +53,8 @@ for (var in variables) {
   
   # Perform ADF test for the initial series
   adf_result_first <- adf.test(data)
-  p_value_first <- round(adf_result_first$p.value, digits = 3)
+  p_value_first <- adf_result_first$p.value
+  formatted_p_value_first <- ifelse(p_value_first <= 0.01, "<0.01", sprintf("%.3f", p_value_first))
   stationarity_first <- ifelse(p_value_first <= 0.05, "Stationary", "Non-Stationary")
   
   num_diff <- 0
@@ -116,142 +66,398 @@ for (var in variables) {
     num_diff <- num_diff + 1
     data <- diff(data)
     adf_result_last <- adf.test(data)
-    p_value_last <- round(adf_result_last$p.value, digits = 3)
+    p_value_last <- adf_result_last$p.value
+    formatted_p_value_last <- ifelse(p_value_last <= 0.01, "<0.01", sprintf("%.3f", p_value_last))
     stationarity_last <- ifelse(p_value_last <= 0.05, "Stationary", "Non-Stationary")
   }
   
   # Append results to the dataframe
   adf_results <- adf_results %>%
     add_row(variable = var,
-            first_pvalue = p_value_first,
+            first_pvalue = formatted_p_value_first,
             first_stationarity = stationarity_first,
-            last_pvalue = p_value_last,
+            last_pvalue = formatted_p_value_last,
             last_stationarity = stationarity_last,
             num_differences = num_diff)
 }
 
 # Display the rounded p-values results
 print(adf_results)
-
-df_bruh <- cbind(df[,c("year","gdp")],df2$gdp)
-
-df_bruh |>
-  ggplot(aes(x=year)) +
-  geom_line( aes(y=gdp)) + 
-  geom_line( aes(y=df2$gdp)) + # Divide by 10 to get the same range than the temperature
-    
-    scale_y_continuous(
-      
-      # Features of the first axis
-      name = "First Axis",
-      
-      # Add a second axis and specify its features
-      sec.axis = sec_axis(~.*coeff, name="Second Axis")
-  )
 ```
 
-# Testing with limited variables filtered based on correlation distribution matrix (to prevent cross-validation)
 
-Variables considered: unnemploy, population, housing, limestone, gdp
-
+# Adjusting for differencing 
 ```{r}
-# --------- TESTING WITH LIMITED VARIABLES ----------- cpi, housing, gdp , Cement, oilprice, gasppi
+diff_1_vars_lim <- df[,c("unemploy","housing","Cement","gdp")]
+diff_1_vars_lim <- ts(diff_1_vars_lim, start = start_year, frequency = 1)
+diff_1_vars_lim <- as.data.frame(lapply(diff_1_vars_lim,function(x) diff(x)))
 
- #dividing by a billion
-
-diff_1_vars_lim <- df[,c("unemploy","Cement","limestone","housing","gdp")]
-diff_1_vars_lim <- ts(diff_1_vars_lim, start = 1968, frequency = 1)
-diff_1_vars_lim <- lapply(diff_1_vars_lim,function(x) diff(x))
-diff_3_vars_lim <- diff(ts(df[,"population"],start = 1968, frequency = 1),differences = 3)
-
-dummy_var <- data.frame(year = 1971:2021) |>
-  mutate(value = case_when(year %in% c(1974,2008,2009,2020) ~ 1,TRUE ~ 0))
+diff_2_vars_lim <- df[,c("limestone")]
+diff_2_vars_lim <- ts(diff_2_vars_lim, start = start_year, frequency = 1)
+diff_2_vars_lim <- as.data.frame(lapply(diff_2_vars_lim,function(x) diff(x, differences = 2)))
 
 differenced_df_lim <- cbind(
-  as.data.frame(diff_1_vars_lim)[-c(1,2),],
-  as.data.frame(diff_3_vars_lim)
+  diff_1_vars_lim[-1,],
+  diff_2_vars_lim
 )
 
- #Did not include dummy var 
+differenced_df_lim <- ts(differenced_df_lim, start = start_year + 2,frequency = 1)
 
-differenced_df_lim <- as.data.frame(differenced_df_lim)
+optimal_lag_lim <- VARselect(differenced_df_lim,lag.max = 7) #7 is lag.max because 7^2 is 49 which is less than our 52 observations
+optimal_lag_lim #BIC / SC Test
 
-optimal_lag_lim <- VARselect(differenced_df_lim,lag.max = 5) #7 is lag.max because 7^2 is 49 which is less than our 52 observations
-optimal_lag_lim <- optimal_lag_lim$selection[3] #BIC / SC Test
+var_model_lim <- VAR(differenced_df_lim, p = 1, type = "both") # need to justify why we can use the "both" parameter
 
-var_model_lim <- VAR(differenced_df_lim, p = 1, type = "const")
-
-forecast_lim <- predict(var_model_lim, n.ahead = 29)
-par(mar = c(1, 1, 1, 1))
+forecast_lim <- predict(var_model_lim, n.ahead = 9,ci = 0.95)
+par(col = "black", col.axis = "black",mfrow = c(4,1), mar = c(2,2,2,2))
 plot(forecast_lim)
+fanchart(forecast_lim, 
+         main = c("Cement","Unemployment","Housing", "Limestone","GDP")
+         )
 
-forecast_original_lim <- cumsum(forecast_lim$fcst$Cement[,1]) + df$Cement[length(df$Cement)]#the original value in 2021
-# forecast_original_lim_lower_upper <-apply(forecast_lim$fcst$Cement[,2:3],2,cumsum) + df$Cement[length(df$Cement)]
 
-df1 <- data.frame(df$Cement)
-colnames(df1) <- "cement"
-df2 <- data.frame(forecast_original_lim)
-colnames(df2) <- "cement"
+tmin <- as.Date("1973-01-01")
+tmax <- as.Date("2050-01-01")
+tlab <- seq(tmin, tmax, by="year")
+time <- substr(tlab, 0, 4)
+filtered_years <- replace(time, !(time %in% c("1975", "1980", "1985", "1990", "1995", "2000", "2005", "2010", "2015", "2020", "2025", "2030", "2035", "2040", "2045", "2050")), NA)
 
-merged_df_lim <- rbind(df1, df2)
-years_lim <- data.frame(1968:2050)
-colnames(years_lim) <- "years"
 
-plot_lim <- cbind(years_lim,merged_df_lim)
+fanchart2(forecast_lim
+          ,xaxt="n" #removes original xaxis
+          ,ylab = c("Thousand Metric Tons","Percent (%)","Thousands of Units","Thousand Metric Tons","Billions of USD") #### question 1: see hacked function ###
+          ,main = c("Cement - 1st Difference","Unemployment - 1st Difference","Housing - 1st Difference", "Limestone - 2nd Difference","Real GDP - 1st Difference")
+          ,colors= grDevices::gray.colors(5)#original is heat.colors(12)
+          ,lab.at = seq(1,length(tlab)+0,1)
+          ,lab.text = filtered_years
+)
 
-plot_lim |>
-  ggplot(aes(x = years, y = cement)) + 
-  geom_line() + 
-  xlab("Years") + ylab("Cement (million metric tons)") +
+
+```
+#BEAUTIFUL HACKED VERSION OF vars::fanchart 
+
+https://stackoverflow.com/questions/51601634/fanchart-customisation-vars-package
+```{r}
+
+
+fanchart2 <- function(x,
+                       colors = NULL,
+                       cis = NULL,
+                       names = NULL,
+                       main = NULL,
+                       ylab = NULL,
+                       xlab = NULL,
+                       col.y = NULL,
+                       add.preds = NULL,
+                       nc,
+                       plot.type = c("multiple","single"),
+                       mar = par("mar"),
+                       oma = par("oma"),
+                       lab.at=NULL,
+                       lab.text=NULL,...) {
+  if (!(class(x) == "varprd")){
+    stop("\nPlease provide an object of class 'varprd',\ngenerated by predict-method for objects of class 'varest'.\n")
+  }
+  if (is.null(colors)){
+    colors <- gray(sqrt(seq(from = 0.05, to = 1, length = 9)))
+  }
+
+
+  if (is.null(cis)) {
+    cis <- seq(0.1, 0.9, by = 0.1)
+  }
+  else {
+    if ((min(cis) <= 0) || (max(cis) >= 1)){
+      stop("\nValues of confidence intervals must be in(0, 1).\n")
+    }
+    if (length(cis) > length(colors)){
+      stop("\nSize of 'colors' vector must be at least as long as\nsize of 'cis' vector\n")
+    }
+  }
+  n.regions <- length(cis)
+  n.ahead <- nrow(x$fcst[[1]])
+  K <- ncol(x$endog)
+  e.sample <- nrow(x$endog)
+  endog <- x$endog
+  fcst <- NULL
+  for (j in 1:n.regions) {
+    fcst[[j]] <- predict(x$model, n.ahead = n.ahead, ci = cis[j],
+                         dumvar = x$exo.fcst)$fcst
+  }
+  xx <- seq(e.sample, length.out = n.ahead + 1)
+  xx <- c(xx, rev(xx))
+  op <- par(no.readonly = TRUE)
+  plot.type <- match.arg(plot.type)
+  ynames <- colnames(endog)
+  if (is.null(names)) {
+    names <- ynames
+  }
+  else {
+    names <- as.character(names)
+    if (!(all(names %in% ynames))) {
+      warning("\nInvalid variable name(s) supplied, using first variable.\n")
+      names <- ynames[1]
+    }
+  }
+  nv <- length(names)
+  ifelse(is.null(main), main <- paste("Fanchart for variable",
+                                      names), main <- rep(main, nv)[1:nv])
+  ifelse(is.null(ylab), ylab <- "", ylab <- ylab)
+  ifelse(is.null(xlab), xlab <- "", xlab <- xlab)
+  ifelse(is.null(col.y), col.y <- "black", col.y <- col.y)
+  if (plot.type == "single") {
+    if (nv > 1)
+      par(ask = TRUE)
+    par(mar = mar, oma = oma)
+  }
+  else if (plot.type == "multiple") {
+    if (missing(nc)) {
+      nc <- ifelse(nv > 4, 2, 1)
+    }
+    nr <- ceiling(nv/nc)
+    par(mfcol = c(nr, nc), mar = mar, oma = oma)
+  }
+  for (i in 1:nv) {
+    ymax <- max(c(fcst[[n.regions]][names[i]][[1]][, 3]),
+                endog[, names[i]])
+    ymin <- min(c(fcst[[n.regions]][names[i]][[1]][, 2]),
+                endog[, names[i]])
+    yy1 <- c(endog[e.sample, names[i]], fcst[[1]][names[i]][[1]][,
+                                                                 2], rev(c(endog[e.sample, names[i]], fcst[[1]][names[i]][[1]][,
+                                                                                                                               3])))
+    plot.ts(c(endog[, names[i]], rep(NA, n.ahead)),
+            main = main[i],
+            ylim = c(ymin, ymax),
+            ylab = ylab[i],#### question 1 #### modivied ylab to depend on the loop counter
+            xlab = xlab,
+            col = col.y,
+            ...)
+    polygon(xx, yy1, col = colors[1], border = colors[1])
+    if (n.regions > 1) {
+      for (l in 2:n.regions) {
+        yyu <- c(endog[e.sample, names[i]], fcst[[l]][names[i]][[1]][,
+                                                                     3], rev(c(endog[e.sample, names[i]], fcst[[l -
+                                                                                                                  1]][names[i]][[1]][, 3])))
+        yyl <- c(endog[e.sample, names[i]], fcst[[l -
+                                                    1]][names[i]][[1]][, 2], rev(c(endog[e.sample,
+                                                                                         names[i]], fcst[[l]][names[i]][[1]][, 2])))
+        polygon(xx, yyu, col = colors[l], border = colors[l])
+        polygon(xx, yyl, col = colors[l], border = colors[l])
+      }
+    }
+
+    #### question 4 ####
+    # if a matrix of points at various times in the prediction is sent to the function
+    # they will be plotted here
+    # standard adjustments to color and pch are possible
+    # assumes a matrix of values is given with columns in order of the variables (price=col 1)
+    # and NA values are times without prediction and not plotted
+    if(is.null(add.preds)==F){
+      points(x=xx[2:(length(xx)/2)]
+             ,y=add.preds[,i]
+             ,col='gray48'
+             ,pch=16)
+    }
+
+    #### question 3: adding axis to each plot inside the hacked function ####
+    # standard modifications can be done to this function
+    if(is.null(lab.at)==F){
+      axis(1,
+           at=lab.at,
+           labels=lab.text,
+           las=3,
+           line=1,
+           cex.axis=1) #orignal is 0.6
+    }
+
+  }
+  on.exit(par(op))
+}
+```
+
+
+```{r}
+# --------------------
+forecast_original_lim_Cement <- cumsum(forecast_lim$fcst$Cement[,1]) + df$Cement[length(df$Cement)]
+forecast_original_lim_housing <- cumsum(forecast_lim$fcst$housing[,1]) + df$housing[length(df$housing)]
+forecast_original_lim_unemploy <- cumsum(forecast_lim$fcst$unemploy[,1]) + df$unemploy[length(df$unemploy)]
+forecast_original_lim_limestone <- cumsum(cumsum(forecast_lim$fcst$limestone[,1]) + diff(df$limestone)[length(diff(df$limestone))]) + df$limestone[length(df$limestone)]
+forecast_original_lim_gdp <- cumsum(forecast_lim$fcst$gdp[,1]) + df$gdp[length(df$gdp)]
+
+forecast_original_lim_Cement
+forecast_original_lim_housing
+forecast_original_lim_unemploy
+forecast_original_lim_limestone
+forecast_original_lim_gdp
+
+
+fcst_original_all <- bind_cols(data.frame(seq(2022,2030)),
+                               bind_cols(forecast_original_lim_Cement,
+                                         forecast_original_lim_unemploy,
+                                         forecast_original_lim_housing,
+                                         forecast_original_lim_limestone,
+                                         forecast_original_lim_gdp)
+                               )
+colnames(fcst_original_all) <- c("year",variables) 
+
+hist_df <- df[,c("year",variables)]
+
+
+hist_fcst_all <- bind_rows(hist_df,fcst_original_all)
+
+plot_val <- hist_fcst_all |>
+  pivot_longer(cols = -c(year,Cement), names_to = "variable", values_to = "value")
+
+plot_facet <- ggplot(plot_val, aes(x = year, y = value)) +
+  geom_line() +
+  facet_wrap(~ variable, scales = "free_y", ncol = 2) +
+  labs(x = "Years", y = "Value")
+
+plot_cement <- ggplot(plot_val, aes(x = year, y = Cement)) + 
+  geom_line() +
+  xlab("Years") + ylab("Production (Mmt)") +
+  scale_y_continuous(labels = scales::comma_format(scale = 1e-3)) +
+  scale_x_continuous(breaks = seq(1970, 2030, by = 5)) +
+  geom_vline(xintercept = 2021, color = "red", linetype = "dashed") +
+  ggtitle("Cement Production Projection in the U.S.") +
+  theme_bw()
+
+plot_cement 
+
+plot_facet
+
+```
+
+#STEPWISE STUFF
+```{r}
+#Value of stepwise
+intercept_coeff <- 2.465e+04
+unemploy_coeff <- -1.043e+03
+housing_coeff <- 1.009e+01
+limestone_coeff <- 3.922e-01
+gdp_coeff <- 7.934e-01
+
+
+stepwise_vals <- bind_cols(data.frame(seq(start_year,2050), 
+                                       data.frame(hist_fcst_all$unemploy * unemploy_coeff + hist_fcst_all$housing * housing_coeff + hist_fcst_all$limestone * limestone_coeff + hist_fcst_all$gdp * gdp_coeff + intercept_coeff)))
+colnames(stepwise_vals) <- c("year","Cement_stepwise") 
+
+
+stepwise_vals |>
+  ggplot(aes(x = year, y= Cement_stepwise)) + 
+  geom_line() +
+  xlab("Years") + ylab("Production (Mmt)") +
   scale_y_continuous(labels = scales::comma_format(scale = 1e-3)) +
   scale_x_continuous(breaks = seq(1970, 2050, by = 5)) +
-  geom_vline(xintercept = 2021, color = "red", linetype = "dashed")
+  geom_vline(xintercept = 2021, color = "red", linetype = "dashed") +
+  ggtitle("Cement Stepwise Production Projection in the U.S.") +
+  theme_bw()
 
-# ------------------
-
-# forecast_original_lim <- cumsum(forecast_lim$fcst$gdp[,1]) + df$gdp[length(df$gdp)]#the original value in 2021
-# # forecast_original_lim_lower_upper <-apply(forecast_lim$fcst$Cement[,2:3],2,cumsum) + df$Cement[length(df$Cement)]
-# 
-# df1 <- data.frame(df$gdp)
-# colnames(df1) <- "gdp"
-# df2 <- data.frame(forecast_original_lim)
-# colnames(df2) <- "gdp"
-# 
-# merged_df_lim <- rbind(df1, df2)
-# years_lim <- data.frame(1968:2050)
-# colnames(years_lim) <- "years"
-# 
-# plot_lim <- cbind(years_lim,merged_df_lim)
-# 
-# plot_lim |>
-#   ggplot(aes(x = years, y = gdp)) + 
-#   geom_line() + 
-#   xlab("Years") + ylab("gdp") +
-#   scale_x_continuous(breaks = seq(1970, 2050, by = 5)) +
-#   geom_vline(xintercept = 2021, color = "red", linetype = "dashed")
+VAR_vs_stepwise <- bind_cols(hist_fcst_all[,c("year","Cement")],
+                            stepwise_vals[,"Cement_stepwise"])
+colnames(VAR_vs_stepwise) <- c("year","Cement_VAR","Cement_stepwise") 
 
 
+VAR_vs_stepwise_new <- VAR_vs_stepwise
+VAR_vs_stepwise_new$Cement_VAR_only_fcst <- ifelse(VAR_vs_stepwise_new$year < 2021, NA, VAR_vs_stepwise_new$Cement_VAR)
+VAR_vs_stepwise_new$Cement_hist_only <- ifelse(VAR_vs_stepwise_new$year <= 2020, VAR_vs_stepwise_new$Cement_VAR, NA)
+
+VAR_vs_stepwise_new |>
+  ggplot(aes(x = year)) + 
+  geom_line(aes(y = Cement_hist_only, color = "1968-2021 Recorded Values")) +
+  geom_line(aes(y = Cement_VAR_only_fcst, color = "VAR 2022-2050 Forecasts")) +
+  geom_line(aes(y = Cement_stepwise, color = "Stepwise 1968-2050 Compared")) +
+  xlab("Years") + ylab("Production (Mmt)") +
+  scale_y_continuous(labels = scales::comma_format(scale = 1e-3)) +
+  scale_x_continuous(breaks = seq(1970, 2050, by = 5)) +
+  scale_color_manual(values = c("VAR 2022-2050 Forecasts" = "#3e649e", "1968-2021 Recorded Values" = "black", "Stepwise 1968-2050 Compared" = "#00ba38")) +
+  geom_vline(xintercept = 2021, color = "red", linetype = "dashed") +
+  ggtitle("Cement VAR vs Stepwise Production Projection in the U.S.") +
+  theme_bw()
+
+```
+
+
+#Each Individual Projection in its original units 
+
+```{r}
+
+# Splitting Data into forecasted value, and lower and upper bounds 
+fcst_val <- as.data.frame(forecast_lim$fcst)[, grepl("fcst", colnames(as.data.frame(forecast_lim$fcst)))]
+fcst_lower <- as.data.frame(forecast_lim$fcst)[, grepl("lower", colnames(as.data.frame(forecast_lim$fcst)))]
+fcst_upper <- as.data.frame(forecast_lim$fcst)[, grepl("upper", colnames(as.data.frame(forecast_lim$fcst)))]
+
+#Getting Real Values
+consts_df <- as.data.frame(df[length(df$Cement),variables])
+
+fcst_original_val <- fcst_val |>
+  mutate_all(cumsum) + consts_df[rep(seq_len(nrow(consts_df)), each = nrow(fcst_val)), ]
+fcst_original_val <- bind_cols(data.frame(seq(2022,2050)),fcst_original_val)
+colnames(fcst_original_val) <- c("year",variables) 
+
+
+fcst_original_lower <- fcst_lower |>
+  mutate_all(cumsum) + consts_df[rep(seq_len(nrow(consts_df)), each = nrow(fcst_lower)), ]
+fcst_original_lower <- bind_cols(data.frame(seq(2022,2050)),fcst_original_lower)
+colnames(fcst_original_lower) <- c("year",variables) 
+
+
+fcst_original_upper <- fcst_upper |>
+  mutate_all(cumsum) + consts_df[rep(seq_len(nrow(consts_df)), each = nrow(fcst_upper)), ]
+fcst_original_upper <- bind_cols(data.frame(seq(2022,2050)),fcst_original_upper)
+colnames(fcst_original_upper) <- c("year",variables) 
+
+#Putting together historical (hist) and forecasted data in original units (fcst)
+
+hist_df <- df[,c("year",variables)]
+
+
+hist_fcst_val <- bind_rows(hist_df,fcst_original_val)
+hist_fcst_lower <- bind_rows(hist_df,fcst_original_lower)
+hist_fcst_upper <- bind_rows(hist_df,fcst_original_upper)
+
+plot_val <- hist_fcst_val |>
+  pivot_longer(cols = -c(year,Cement), names_to = "variable", values_to = "value")
+
+plot_facet <- ggplot(plot_val, aes(x = year, y = value)) +
+  geom_line() +
+  facet_wrap(~ variable, scales = "free_y", ncol = 2) +
+  labs(x = "Years", y = "Value")
+
+plot_cement <- ggplot(plot_val, aes(x = year, y = Cement)) + 
+  geom_line() +
+  xlab("Years") + ylab("Production (Mmt)") +
+  scale_y_continuous(labels = scales::comma_format(scale = 1e-3)) +
+  scale_x_continuous(breaks = seq(1970, 2050, by = 5)) +
+  geom_vline(xintercept = 2021, color = "red", linetype = "dashed") +
+  ggtitle("Cement Production Projection in the U.S.") +
+  theme_bw()
+
+plot_cement 
+
+plot_facet
 
 ```
 
 # Diagnostic Tests
 
 ```{r}
-# Testing Autocorrelations
-residuals <- resid(var_model_lim)
-ljung_box_tests <- lapply(1:ncol(residuals), function(i) {
-  Box.test(residuals[, i], lag = 10, type = "Ljung-Box") #using a lag of 10
-})
+# Testing Autocorrelations/Serial Correlation 
 
-# Print the results for each variable
-for (i in 1:length(ljung_box_tests)) {
-  cat("Variable", i, "\n")
-  print(ljung_box_tests[[i]])
-  cat("\n")
-}
+mdl.serial <- serial.test(var_model_lim,lags.pt = 12,type="PT.asymptotic") #Use 12 because its like the default?
 
-# Normality - PASSSSSSSS
-par( mfrow= c(3,2) )
+plot(mdl.serial, names = "Cement")
+
+mdl.serial
+
+#Heteroskedasity - PASS, we fail to reject the null hypothesis so we conclude that there is not enough evidence to deduce heteroskedasity
+mdl.arch <- arch.test(var_model_lim,lags.multi = 12,multivariate.only = TRUE)
+
+mdl.norm <- normality.test(var_model_lim,multivariate.only = TRUE)
+
+mdl.norm
+# Normality - Not sure if we can use normality here
+par( mfrow= c(2,2) )
 resdulpdf<-density(residuals[,"unemploy"])
 plot(resdulpdf,main='Unemploy Residual shape Plot',xlab='Unemploy Residuals')
 resdulpdf<-density(residuals[,"gdp"])
@@ -260,21 +466,17 @@ resdulpdf<-density(residuals[,"housing"])
 plot(resdulpdf,main='housing Residual shape Plot',xlab='housing Residuals')
 resdulpdf<-density(residuals[,"limestone"])
 plot(resdulpdf,main='limestone Residual shape Plot',xlab='limestone Residuals')
-resdulpdf<-density(residuals[,"population"])
-plot(resdulpdf,main='population Residual shape Plot',xlab='population Residuals')
-
-normality.test(var_model_lim, multivariate.only = TRUE)
 
 
-#Heteroskedasity - PASS, we fail to reject the null hypothesis so we conclude that there is not enough evidence to deduce heteroskedasity
-arch.test(var_model_lim)
+
 
 #Granger Causality - PASSS
-causality_test_result <- causality(var_model_lim, cause = c("unemploy", "gdp","housing","population","limestone"))
+granger_causality(var_model_lim)
 
-causality_test_result 
+causality_test_result$Granger 
+
 #Impulse Response 
-irf_results <- irf(var_model_lim, n.ahead = 29, response = c("unemploy", "gdp","housing","population","limestone"))
+irf_results <- irf(var_model_lim, n.ahead = 29, response = c("unemploy", "gdp","housing","limestone"))
 
 plot(irf_results)
 
@@ -284,89 +486,18 @@ stability_result <- stability(var_model_lim,type = "OLS-CUSUM")
 
 plot(stability_result)
 roots(var_model_lim,modulus = TRUE)
+sctest(var_model_lim)
 
 #Correlation Matrix
 summary(var_model_lim)
 stargazer(var_model_lim[["varresult"]], type = "text")
 
-plot(df$year,df$gdp)
 ```
-```{r}
-diff_1_vars_lim <- df[,c("unemploy","Cement","tot_housing", "limestone","gdp")]
-diff_1_vars_lim <- ts(diff_1_vars_lim, start = 1968, frequency = 1)
-diff_1_vars_lim <- lapply(diff_1_vars_lim,function(x) diff(x))
 
-
-dummy_var <- data.frame(year = 1969:2021) |>
-  mutate(value = case_when(year %in% c(1982,1992,2009,2010) ~ 1,TRUE ~ 0)) #Did not include dummy var 
-
-
-differenced_df_lim <- cbind(
-  as.data.frame(diff_1_vars_lim)
-)
-
-optimal_lag_lim <- VARselect(differenced_df_lim,lag.max = 6) #7 is lag.max because 7^2 is 49 which is less than our 52 observations
-optimal_lag_lim <- optimal_lag_lim$selection[3] #BIC / SC Test
-
-var_model_lim <- VAR(differenced_df_lim, p = 1, type = "const")
-
-forecast_lim <- predict(var_model_lim, n.ahead = 29)
-par(mar = c(1, 1, 1, 1))
-plot(forecast_lim)
-
-forecast_original_lim <- cumsum(forecast_lim$fcst$Cement[,1]) + df$Cement[length(df$Cement)]#the original value in 2021
-# forecast_original_lim_lower_upper <-apply(forecast_lim$fcst$Cement[,2:3],2,cumsum) + df$Cement[length(df$Cement)]
-
-df1 <- data.frame(df$Cement)
-colnames(df1) <- "cement"
-df2 <- data.frame(forecast_original_lim)
-colnames(df2) <- "cement"
-
-merged_df_lim <- rbind(df1, df2)
-years_lim <- data.frame(1968:2050)
-colnames(years_lim) <- "years"
-
-plot_lim <- cbind(years_lim,merged_df_lim)
-
-plot_lim |>
-  ggplot(aes(x = years, y = cement)) + 
-  geom_line() + 
-  xlab("Years") + ylab("Cement (million metric tons)") +
-  scale_y_continuous(labels = scales::comma_format(scale = 1e-3)) +
-  scale_x_continuous(breaks = seq(1970, 2050, by = 5)) +
-  geom_vline(xintercept = 2021, color = "red", linetype = "dashed")
-
-# ----------------------------- GDP PROJECTION ----------------
-
-forecast_original_lim <- cumsum(forecast_lim$fcst$gdp[,1]) + df$gdp[length(df$gdp)]#the original value in 2021
-# forecast_original_lim_lower_upper <-apply(forecast_lim$fcst$Cement[,2:3],2,cumsum) + df$Cement[length(df$Cement)]
-
-df1 <- data.frame(df$gdp)
-colnames(df1) <- "gdp"
-df2 <- data.frame(forecast_original_lim)
-colnames(df2) <- "gdp"
-
-merged_df_lim <- rbind(df1, df2)
-years_lim <- data.frame(1968:2050)
-colnames(years_lim) <- "years"
-
-plot_lim <- cbind(years_lim,merged_df_lim)
-
-plot_lim |>
-  ggplot(aes(x = years, y = gdp)) +
-  geom_line() +
-  xlab("Years") + ylab("gdp") +
-  scale_x_continuous(breaks = seq(1970, 2050, by = 5)) +
-  geom_vline(xintercept = 2021, color = "red", linetype = "dashed")
-
-
-```
+#Plotting 
 
 ```{r}
-df |>
-  ggplot(aes(x=year, y=housing)) +
-  geom_line() + 
-  geom_hline(yintercept = 158.8) + 
-  geom_hline(yintercept = 192.0)
 ```
+
+
 

@@ -1,0 +1,48 @@
+---
+title: "davis_VAR_testing3"
+output: html_document
+date: "2023-08-24"
+---
+
+#Load Libraries
+```{r}
+library(MTS)
+library(vars)
+```
+# load data set
+
+```{r}
+setwd("C:/Users/User/Desktop/R_Data_Science/cementresearch/")
+df <- read_csv("data/combinedata6.csv") #includes real GDP
+# df <- read_csv("data/combinedata5.csv")
+
+variables <- c("Cement","unemploy","housing", "limestone","gdp")
+```
+
+# Setting up Criterias
+
+```{r}
+diff_1_vars_lim <- df[,variables]
+diff_1_vars_lim <- ts(diff_1_vars_lim, start = 1977, frequency = 1)
+differenced_df_lim <- as.data.frame(lapply(diff_1_vars_lim,function(x) diff(x)))
+
+optimal_lag_lim <- VARselect(differenced_df_lim,lag.max = 6) #7 is lag.max because 7^2 is 49 which is less than our 52 observations
+optimal_lag_lim #BIC / SC Test
+
+var_model <- vars::VAR(differenced_df_lim, p = 1, type = "trend")
+
+# Get the residuals
+residuals <- residuals(var_model)
+
+# Plot the PACF of the residuals to identify the moving-average order (q)
+pacf_residuals <- pacf(residuals, lag.max = 10)
+
+# Find the significant lags in the PACF plot
+significant_lags <- which(abs(pacf_residuals) > 2 / sqrt(length(residuals)))
+
+# Choose the maximum significant lag as the moving-average order (q)
+ma_order <- max(significant_lags)
+
+varma_bruh <- VARMA(differenced_df_lim, p=1,q = 1)
+```
+

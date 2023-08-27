@@ -1,0 +1,43 @@
+---
+title: "VarSelection"
+output: html_document
+date: "2023-08-23"
+---
+
+
+# Loading Libraries 
+```{r}
+library(glmnet)
+library(readr)
+library(ggplot2)
+library(tidyverse)
+```
+
+#Loading Data Frame/Data Set
+
+```{r}
+setwd("C:/Users/User/Desktop/R_Data_Science/cementresearch/")
+df <- read_csv("data/combinedata6.csv") #includes real GDP
+```
+
+# Lasso Regression 
+```{r}
+# Load  data and specify response variable and predictor variables
+response <- df$Cement
+
+predictors <- df[,!names(df) %in% c("year","lime","silica","Cement")]
+
+# Perform LASSO regression
+lasso_fit <- cv.glmnet(as.matrix(predictors), response,family = "gaussian", alpha = 1, nfolds = 10)
+lasso_fit2 <- glmnet(as.matrix(predictors), response)
+
+plot(lasso_fit2,xvar = "lambda")
+lasso_fit2$lambda
+plot(lasso_fit)
+selected_variables <- coef(lasso_fit, s = lasso_fit$lambda.1se)
+
+
+selected_variables
+
+```
+
