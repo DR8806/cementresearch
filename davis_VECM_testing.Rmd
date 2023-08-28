@@ -6,7 +6,7 @@ date: "2023-08-26"
 
 ```{r}
 library(urca)
-
+library(tsDyn)
 library(vars)
 ```
 
@@ -36,14 +36,24 @@ df <- df[,variables]
 df_ts <-ts(df, start = start_year, frequency = 1)
 
 
-lagselect <- VARselect(df_ts, lag.max = 7, type = "const")
+lagselect <- VARselect(df_ts, lag.max = 5, type = "trend")
 
 lagselect
 
-ctest1t <- ca.jo(df_ts,type = "trace",ecdet = "const",K=6)
+ctest1t <- ca.jo(df_ts,type = "trace",ecdet = "trend",K= 2) #using 5pct gives mr r <=3
 
-ctest1e <- ca.jo(df_ts, type = "eigen", ecdet = "const", K =6)
+ctest1e <- ca.jo(df_ts, type = "eigen", ecdet = "trend", K =4) #using 5pct gives me r <= 2
 
 summary(ctest1e)
+
+model1 <- VECM(df_ts,lag=4 ,r = 1, estim = "ML")
+
+summary(model1)
+
+model1VAR <- vec2var(ctest1e, r = 1)
+
+serial.test(model1VAR,lags.pt = 4, type = "PT.asymptotic")
+
+normality.test()
 ```
 
